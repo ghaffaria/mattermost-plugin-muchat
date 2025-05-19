@@ -1,4 +1,4 @@
-module github.com/pardisco/mattermost-plugin-muchat
+module github.com/ghaffaria/mattermost-plugin-starter-template
 
 go 1.22.0
 
