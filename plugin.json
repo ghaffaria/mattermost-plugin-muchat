@@ -3,6 +3,9 @@
   "name": "MuChat Bot",
   "version": "0.1.0",
   "min_server_version": "9.11.0",
+  "server": {
+    "executable": "plugin-linux-amd64"
+  },
   "settings_schema": {
     "settings": [
       {

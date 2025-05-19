@@ -260,6 +260,8 @@ server-dist:
 ## Builds and bundles the plugin.
 .PHONY: dist
 dist: server-dist apply server webapp bundle
+	mkdir -p dist/$(PLUGIN_ID)/server
+	cp server/dist/plugin-linux-amd64 dist/$(PLUGIN_ID)/server/
 
 ## Builds and installs the plugin to a server.
 .PHONY: deploy
