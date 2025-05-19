@@ -224,6 +224,17 @@ else
 endif
 endif
 
+## Builds the server binary.
+.PHONY: server-dist
+server-dist:
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o server/dist/plugin-linux-amd64 ./server
+
+## Builds and bundles the plugin.
+.PHONY: dist
+dist: server-dist apply server webapp bundle
+	mkdir -p dist/$(PLUGIN_ID)/server
+	cp server/dist/plugin-linux-amd64 dist/$(PLUGIN_ID)/server/
+
 ## Generates a tar bundle of the plugin for install.
 .PHONY: bundle
 bundle:
@@ -251,17 +262,6 @@ else
 endif
 
 	@echo plugin built at: dist/$(BUNDLE_NAME)
-
-## Builds the server binary.
-.PHONY: server-dist
-server-dist:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o server/dist/plugin-linux-amd64 ./server
-
-## Builds and bundles the plugin.
-.PHONY: dist
-dist: server-dist apply server webapp bundle
-	mkdir -p dist/$(PLUGIN_ID)/server
-	cp server/dist/plugin-linux-amd64 dist/$(PLUGIN_ID)/server/
 
 ## Builds and installs the plugin to a server.
 .PHONY: deploy
