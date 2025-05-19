@@ -36,6 +36,16 @@ func NewCommandHandler(client *pluginapi.Client) Command {
 	}
 }
 
+// GetCommand returns the Mattermost command definition for the plugin.
+func GetCommand() *model.Command {
+	return &model.Command{
+		Trigger:          helloCommandTrigger,
+		AutoComplete:     true,
+		AutoCompleteDesc: "Say hello to the plugin",
+		AutoCompleteHint: "[your message]",
+	}
+}
+
 // ExecuteCommand hook calls this method to execute the commands that were registered in the NewCommandHandler function.
 func (c *Handler) Handle(args *model.CommandArgs) (*model.CommandResponse, error) {
 	trigger := strings.TrimPrefix(strings.Fields(args.Command)[0], "/")

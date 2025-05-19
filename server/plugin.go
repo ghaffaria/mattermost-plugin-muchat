@@ -14,7 +14,7 @@ import (
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 	"github.com/mattermost/mattermost/server/public/pluginapi/cluster"
 	"github.com/pkg/errors"
-	"./command"
+	"github.com/pardisco/mattermost-plugin-muchat/server/command"
 )
 
 // Plugin implements the interface expected by the Mattermost server to communicate between the server and plugin processes.
