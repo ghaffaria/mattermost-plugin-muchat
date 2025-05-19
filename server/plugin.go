@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
+	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/mattermost/mattermost-plugin-starter-template/server/command"
-	"github.com/mattermost/mattermost-plugin-starter-template/server/store/kvstore"
+	"github.com/pardisco/mattermost-plugin-muchat/server/command"
+	"github.com/pardisco/mattermost-plugin-muchat/server/store/kvstore"
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
@@ -35,9 +38,33 @@ type Plugin struct {
 	// configuration is the active plugin configuration. Consult getConfiguration and
 	// setConfiguration for usage.
 	configuration *configuration
+
+	// configuration stores the plugin's configuration.
+	configLock sync.RWMutex
 }
 
-// OnActivate is invoked when the plugin is activated. If an error is returned, the plugin will be deactivated.
+// OnConfigurationChange بارگذاری و اعتبارسنجی تنظیمات جدید را مدیریت می‌کند.
+func (p *Plugin) OnConfigurationChange() error {
+	var config Configuration
+	if err := p.API.LoadPluginConfiguration(&config); err != nil {
+		logError(p, err, "خطا در بارگذاری تنظیمات پلاگین")
+		return err
+	}
+
+	if err := config.IsValid(); err != nil {
+		logError(p, err, "تنظیمات نامعتبر است")
+		return err
+	}
+
+	p.configLock.Lock()
+	p.configuration = &config
+	p.configLock.Unlock()
+
+	logDebug(p, "تنظیمات پلاگین با موفقیت به‌روزرسانی شد.")
+	return nil
+}
+
+// OnActivate ثبت دستور /mu را مدیریت می‌کند.
 func (p *Plugin) OnActivate() error {
 	p.client = pluginapi.NewClient(p.API, p.Driver)
 
@@ -57,6 +84,12 @@ func (p *Plugin) OnActivate() error {
 
 	p.backgroundJob = job
 
+	if err := p.API.RegisterCommand(command.GetCommand()); err != nil {
+		logError(p, err, "خطا در ثبت دستور /mu")
+		return err
+	}
+
+	logDebug(p, "پلاگین با موفقیت فعال شد.")
 	return nil
 }
 
@@ -77,6 +110,52 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 		return nil, model.NewAppError("ExecuteCommand", "plugin.command.execute_command.app_error", nil, err.Error(), http.StatusInternalServerError)
 	}
 	return response, nil
+}
+
+// MessageHasBeenPosted پیام‌های ارسال‌شده را بررسی می‌کند.
+// اگر پیام شامل @muchat باشد، آن را به MuChat ارسال می‌کند.
+func (p *Plugin) MessageHasBeenPosted(c *plugin.Context, post *model.Post) {
+	if !strings.Contains(post.Message, "@muchat") {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	message := strings.ReplaceAll(post.Message, "@muchat", "")
+	client := NewMuChatClient(p.configuration.MuChatApiKey)
+	response, err := client.Ask(ctx, p.configuration.AgentID, message, true)
+	if err != nil {
+		logError(p, err, "خطا در ارسال پیام به MuChat")
+		return
+	}
+	defer response.Close()
+
+	var responseText strings.Builder
+	buf := make([]byte, 1024)
+	for {
+		bytesRead, readErr := response.Read(buf)
+		if bytesRead > 0 {
+			chunk := string(buf[:bytesRead])
+			responseText.WriteString(chunk)
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			logError(p, readErr, "خطا در خواندن پاسخ استریم")
+			return
+		}
+	}
+
+	reply := &model.Post{
+		ChannelId: post.ChannelId,
+		RootId:    post.Id,
+		Message:   responseText.String(),
+	}
+	if _, err := p.API.CreatePost(reply); err != nil {
+		logError(p, err, "خطا در ارسال پاسخ MuChat")
+	}
 }
 
 // See https://developers.mattermost.com/extend/plugins/server/reference/
