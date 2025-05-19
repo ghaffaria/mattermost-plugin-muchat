@@ -1,3 +1,5 @@
+// mu-chat-plugin/server/plugin.go
+// mu-chat-plugin/server/plugin.go
 package main
 
 import (
@@ -9,13 +11,13 @@ import (
 
 	"github.com/pkg/errors"
 
-	// ── Mattermost SDK
+	// Mattermost SDK
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 	"github.com/mattermost/mattermost/server/public/pluginapi/cluster"
 
-	// ── لایهٔ کمکی داخلی
+	// لایهٔ کمکی داخلی
 	"github.com/ghaffaria/mattermost-plugin-starter-template/server/command"
 	"github.com/ghaffaria/mattermost-plugin-starter-template/server/store/kvstore"
 )
@@ -74,28 +76,73 @@ func (p *Plugin) OnActivate() error {
 }
 
 /*───────────────────────────────
+   کمکى: بررسی وجود مقدار در Slice
+───────────────────────────────*/
+func contains(list []string, id string) bool {
+	for _, v := range list {
+		if v == id {
+			return true
+		}
+	}
+	return false
+}
+
+/*───────────────────────────────
+   فیلتر دسترسی
+───────────────────────────────*/
+func isAllowed(id string, mode string, allow []string, block []string, isChannel bool) bool {
+	switch mode {
+	case "block_all":
+		if isChannel {
+			// برای ChannelAccess فقط block_all معتبر است
+			return false
+		}
+		return true
+	case "allow_selected":
+		return contains(allow, id)
+	case "block_selected":
+		return !contains(block, id)
+	default: // allow_all
+		return true
+	}
+}
+
+/*───────────────────────────────
    MessageHasBeenPosted
 ───────────────────────────────*/
 func (p *Plugin) MessageHasBeenPosted(_ *plugin.Context, post *model.Post) {
-	// ﴾۱﴿ پیام خودِ Bot را نادیده بگیر
+	// ۱) پیام خود Bot را نادیده بگیر
 	if post.UserId == p.botUserID {
 		return
 	}
 
-	// ﴾۲﴿ نوع کانال را بگیر
+	cfg := p.getConfiguration()
+
+	// ۲) نوع کانال را بگیر
 	channel, chErr := p.API.GetChannel(post.ChannelId)
 	if chErr != nil {
 		logError(p, chErr, "cannot get channel")
 		return
 	}
+
+	/*────────────────── دسترسی کانال ──────────────────*/
+	if !isAllowed(channel.Id, cfg.ChannelAccess, cfg.ChannelAllowIDs, cfg.ChannelBlockIDs, true) {
+		return
+	}
+
+	/*────────────────── دسترسی کاربر ──────────────────*/
+	if !isAllowed(post.UserId, cfg.UserAccess, cfg.UserAllowIDs, cfg.UserBlockIDs, false) {
+		return
+	}
+
 	isDM := channel.Type == model.ChannelTypeDirect
 
-	// ﴾۳﴿ در کانال غیر DM وجود @muchat الزامی است
+	// ۳) در کانال غیر DM وجود @muchat الزامی است
 	if !isDM && !strings.Contains(post.Message, "@muchat") {
 		return
 	}
 
-	// ﴾۴﴿ متن پرسش
+	// ۴) متن پرسش
 	message := post.Message
 	if !isDM {
 		message = strings.ReplaceAll(message, "@muchat", "")
@@ -105,11 +152,10 @@ func (p *Plugin) MessageHasBeenPosted(_ *plugin.Context, post *model.Post) {
 		return
 	}
 
-	// ﴾۵﴿ تماس با MuChat
+	// ۵) تماس با MuChat
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	cfg := p.getConfiguration()
 	rc, err := NewMuChatClient(cfg.MuChatApiKey).Ask(ctx, cfg.AgentID, message, false)
 	if err != nil {
 		logError(p, err, "MuChat request failed")

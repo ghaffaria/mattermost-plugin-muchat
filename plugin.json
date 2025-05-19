@@ -3,9 +3,11 @@
   "name": "MuChat Bot",
   "version": "0.1.0",
   "min_server_version": "9.11.0",
+
   "server": {
     "executable": "server/dist/plugin-linux-amd64"
   },
+
   "settings_schema": {
     "settings": [
       {
@@ -30,6 +32,67 @@
         "type": "bool",
         "help_text": "Enable debug mode for additional logging.",
         "default": false
+      },
+
+  
+      {
+        "key": "ChannelAccess",
+        "display_name": "Channel access mode",
+        "type": "dropdown",
+        "help_text": "Define how this bot can interact in channels.",
+        "options": [
+          { "display_name": "Allow for all channels",      "value": "allow_all" },
+          { "display_name": "Allow for selected channels", "value": "allow_selected" },
+          { "display_name": "Block selected channels",     "value": "block_selected" },
+          { "display_name": "Block all channels",          "value": "block_all" }
+        ],
+        "default": "allow_all"
+      },
+      {
+        "key": "ChannelAllowList",
+        "display_name": "Channel allow list",
+        "type": "text",
+        "help_text": "Comma-separated list of channel IDs (e.g. abc123,xyz987) allowed for the bot when 'Allow for selected channels' is chosen.",
+        "placeholder": "channel-id-1, channel-id-2",
+        "default": ""
+      },
+      {
+        "key": "ChannelBlockList",
+        "display_name": "Channel block list",
+        "type": "text",
+        "help_text": "Comma-separated list of channel IDs to block when 'Block selected channels' is chosen.",
+        "placeholder": "channel-id-1, channel-id-2",
+        "default": ""
+      },
+
+
+      {
+        "key": "UserAccess",
+        "display_name": "User access mode",
+        "type": "dropdown",
+        "help_text": "Define which users can chat with this bot.",
+        "options": [
+          { "display_name": "Allow for all users",      "value": "allow_all" },
+          { "display_name": "Allow for selected users", "value": "allow_selected" },
+          { "display_name": "Block selected users",     "value": "block_selected" }
+        ],
+        "default": "allow_all"
+      },
+      {
+        "key": "UserAllowList",
+        "display_name": "User allow list",
+        "type": "text",
+        "help_text": "Comma-separated list of user IDs allowed to chat with the bot when 'Allow for selected users' is chosen.",
+        "placeholder": "user-id-1, user-id-2",
+        "default": ""
+      },
+      {
+        "key": "UserBlockList",
+        "display_name": "User block list",
+        "type": "text",
+        "help_text": "Comma-separated list of user IDs to block when 'Block selected users' is chosen.",
+        "placeholder": "user-id-1, user-id-2",
+        "default": ""
       }
     ]
   }

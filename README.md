@@ -8,6 +8,7 @@ MuChat Bot is a Mattermost plugin that integrates conversational AI capabilities
 - Automatically handles direct messages (DMs).
 - Configurable API key and agent ID for MuChat integration.
 - Optional debug mode for enhanced logging.
+- Fine-grained control over user and channel access.
 
 ## Requirements
 
@@ -38,6 +39,12 @@ MuChat Bot is a Mattermost plugin that integrates conversational AI capabilities
    - **MuChat API Key**: The API key for authenticating with the MuChat service.
    - **Agent ID**: The ID of the MuChat agent to forward messages to.
    - **Enable Debug Mode**: Enable or disable debug logging.
+   - **Channel Access Mode**: Define how the bot interacts in channels (allow/block all or selected channels).
+   - **Channel Allow List**: Select channels where the bot is allowed when "Allow for selected channels" is chosen.
+   - **Channel Block List**: Select channels where the bot is blocked when "Block selected channels" is chosen.
+   - **User Access Mode**: Define which users can interact with the bot (allow/block all or selected users).
+   - **User Allow List**: Select users allowed to interact with the bot when "Allow for selected users" is chosen.
+   - **User Block List**: Select users blocked from interacting with the bot when "Block selected users" is chosen.
 
 ## Usage
 
