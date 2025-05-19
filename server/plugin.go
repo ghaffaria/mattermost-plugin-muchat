@@ -8,13 +8,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pardisco/mattermost-plugin-muchat/server/command"
 	"github.com/pardisco/mattermost-plugin-muchat/server/store/kvstore"
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 	"github.com/mattermost/mattermost/server/public/pluginapi/cluster"
 	"github.com/pkg/errors"
+	"./command"
 )
 
 // Plugin implements the interface expected by the Mattermost server to communicate between the server and plugin processes.
@@ -37,31 +37,7 @@ type Plugin struct {
 
 	// configuration is the active plugin configuration. Consult getConfiguration and
 	// setConfiguration for usage.
-	configuration *configuration
-
-	// configuration stores the plugin's configuration.
-	configLock sync.RWMutex
-}
-
-// OnConfigurationChange بارگذاری و اعتبارسنجی تنظیمات جدید را مدیریت می‌کند.
-func (p *Plugin) OnConfigurationChange() error {
-	var config Configuration
-	if err := p.API.LoadPluginConfiguration(&config); err != nil {
-		logError(p, err, "خطا در بارگذاری تنظیمات پلاگین")
-		return err
-	}
-
-	if err := config.IsValid(); err != nil {
-		logError(p, err, "تنظیمات نامعتبر است")
-		return err
-	}
-
-	p.configLock.Lock()
-	p.configuration = &config
-	p.configLock.Unlock()
-
-	logDebug(p, "تنظیمات پلاگین با موفقیت به‌روزرسانی شد.")
-	return nil
+	configuration *Configuration
 }
 
 // OnActivate ثبت دستور /mu را مدیریت می‌کند.
@@ -101,15 +77,6 @@ func (p *Plugin) OnDeactivate() error {
 		}
 	}
 	return nil
-}
-
-// This will execute the commands that were registered in the NewCommandHandler function.
-func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*model.CommandResponse, *model.AppError) {
-	response, err := p.commandClient.Handle(args)
-	if err != nil {
-		return nil, model.NewAppError("ExecuteCommand", "plugin.command.execute_command.app_error", nil, err.Error(), http.StatusInternalServerError)
-	}
-	return response, nil
 }
 
 // MessageHasBeenPosted پیام‌های ارسال‌شده را بررسی می‌کند.

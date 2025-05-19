@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/mattermost/mattermost-server/v6/model"
+	"github.com/mattermost/mattermost/server/public/model"
 )
 
 // GetCommand تعریف دستور /mu برای پلاگین MuChat را بازمی‌گرداند.

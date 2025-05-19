@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/mattermost/mattermost/server/public/model"
 )
 
 // debugPrefix پیشوندی برای لاگ‌های دیباگ
