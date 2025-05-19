@@ -9,13 +9,13 @@ import (
 
 	"github.com/pkg/errors"
 
-	// بسته‌های عمومی Mattermost
+	// ── Mattermost SDK
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 	"github.com/mattermost/mattermost/server/public/pluginapi/cluster"
 
-	// لایهٔ کمکی داخلی
+	// ── لایهٔ کمکی داخلی
 	"github.com/ghaffaria/mattermost-plugin-starter-template/server/command"
 	"github.com/ghaffaria/mattermost-plugin-starter-template/server/store/kvstore"
 )
@@ -26,17 +26,14 @@ import (
 type Plugin struct {
 	plugin.MattermostPlugin
 
-	// وابستگی‌های کمکی
 	client        *pluginapi.Client
 	kvstore       kvstore.KVStore
 	commandClient command.Command
 	backgroundJob *cluster.Job
 
-	// پیکربندی
 	configurationLock sync.RWMutex
 	configuration     *Configuration
 
-	// Bot
 	botUserID string
 }
 
@@ -44,12 +41,10 @@ type Plugin struct {
    OnActivate
 ───────────────────────────────*/
 func (p *Plugin) OnActivate() error {
-	// کلاینت کمکی
 	p.client = pluginapi.NewClient(p.API, p.Driver)
 	p.kvstore = kvstore.NewKVStore(p.client)
 	p.commandClient = command.NewCommandHandler(p.client)
 
-	// 1) اطمینان از وجود Bot
 	bot := &model.Bot{
 		Username:    "muchat",
 		DisplayName: "MuChat Bot",
@@ -57,17 +52,14 @@ func (p *Plugin) OnActivate() error {
 	}
 	botID, appErr := p.client.Bot.EnsureBot(bot)
 	if appErr != nil {
-		return errors.Wrap(appErr, "cannot ensure bot account")
+		return errors.Wrap(appErr, "cannot ensure bot")
 	}
 	p.botUserID = botID
 
-	// 2) ثبت Slash-Command
 	if err := p.API.RegisterCommand(command.GetCommand()); err != nil {
-		logError(p, err, "خطا در ثبت دستور /mu")
 		return err
 	}
 
-	// 3) Job پس‌زمینهٔ نمونه (هر ساعت)
 	job, err := cluster.Schedule(
 		p.API,
 		"BackgroundJob",
@@ -75,23 +67,9 @@ func (p *Plugin) OnActivate() error {
 		p.runJob,
 	)
 	if err != nil {
-		return errors.Wrap(err, "failed to schedule background job")
+		return errors.Wrap(err, "schedule background job")
 	}
 	p.backgroundJob = job
-
-	logDebug(p, "MuChat plugin activated ✓")
-	return nil
-}
-
-/*───────────────────────────────
-   OnDeactivate
-───────────────────────────────*/
-func (p *Plugin) OnDeactivate() error {
-	if p.backgroundJob != nil {
-		if err := p.backgroundJob.Close(); err != nil {
-			p.API.LogError("Failed to close background job", "err", err)
-		}
-	}
 	return nil
 }
 
@@ -99,37 +77,50 @@ func (p *Plugin) OnDeactivate() error {
    MessageHasBeenPosted
 ───────────────────────────────*/
 func (p *Plugin) MessageHasBeenPosted(_ *plugin.Context, post *model.Post) {
-	// پیام خود Bot
+	// ﴾۱﴿ پیام خودِ Bot را نادیده بگیر
 	if post.UserId == p.botUserID {
 		return
 	}
-	// منشن
-	if !strings.Contains(post.Message, "@muchat") {
+
+	// ﴾۲﴿ نوع کانال را بگیر
+	channel, chErr := p.API.GetChannel(post.ChannelId)
+	if chErr != nil {
+		logError(p, chErr, "cannot get channel")
+		return
+	}
+	isDM := channel.Type == model.ChannelTypeDirect
+
+	// ﴾۳﴿ در کانال غیر DM وجود @muchat الزامی است
+	if !isDM && !strings.Contains(post.Message, "@muchat") {
 		return
 	}
 
-	// پاک‌کردن منشن
-	message := strings.ReplaceAll(post.Message, "@muchat", "")
+	// ﴾۴﴿ متن پرسش
+	message := post.Message
+	if !isDM {
+		message = strings.ReplaceAll(message, "@muchat", "")
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
 
-	// تماس با MuChat
+	// ﴾۵﴿ تماس با MuChat
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	cfg := p.getConfiguration()
-	client := NewMuChatClient(cfg.MuChatApiKey)
-
-	reader, err := client.Ask(ctx, cfg.AgentID, message, false)
+	rc, err := NewMuChatClient(cfg.MuChatApiKey).Ask(ctx, cfg.AgentID, message, false)
 	if err != nil {
-		logError(p, err, "خطا در تماس با MuChat")
+		logError(p, err, "MuChat request failed")
 		return
 	}
-	defer reader.Close()
+	defer rc.Close()
 
-	// خواندن پاسخ
 	var sb strings.Builder
 	buf := make([]byte, 2048)
 	for {
-		n, rerr := reader.Read(buf)
+		n, rerr := rc.Read(buf)
 		if n > 0 {
 			sb.Write(buf[:n])
 		}
@@ -137,25 +128,20 @@ func (p *Plugin) MessageHasBeenPosted(_ *plugin.Context, post *model.Post) {
 			break
 		}
 		if rerr != nil {
-			logError(p, rerr, "خطا در خواندن پاسخ")
+			logError(p, rerr, "read MuChat response")
 			return
 		}
 	}
 
-	// تمیزکاری متن خروجی
 	clean := strings.TrimSpace(sb.String())
-	clean = strings.ReplaceAll(clean, "\r\n", "\n")
-	clean = strings.ReplaceAll(clean, "\n\n", "\n")
-	clean = strings.TrimLeft(clean, ". \n\t")
+	if clean == "" {
+		clean = "متأسفم، پاسخی دریافت نشد."
+	}
 
-	// ارسال پست پاسخ
-	reply := &model.Post{
+	_, _ = p.API.CreatePost(&model.Post{
 		UserId:    p.botUserID,
 		ChannelId: post.ChannelId,
 		RootId:    post.Id,
 		Message:   clean,
-	}
-	if _, err = p.API.CreatePost(reply); err != nil {
-		logError(p, err, "خطا در ارسال پاسخ MuChat")
-	}
+	})
 }
