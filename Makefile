@@ -252,9 +252,14 @@ endif
 
 	@echo plugin built at: dist/$(BUNDLE_NAME)
 
+## Builds the server binary.
+.PHONY: server-dist
+server-dist:
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o server/dist/plugin-linux-amd64 ./server
+
 ## Builds and bundles the plugin.
 .PHONY: dist
-dist: apply server webapp bundle
+dist: server-dist apply server webapp bundle
 
 ## Builds and installs the plugin to a server.
 .PHONY: deploy
