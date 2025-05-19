@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,87 +9,104 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
-// MuChatClient ساختار کلاینت برای ارتباط با API سرویس MuChat
-// شامل کلید API و کلاینت HTTP است.
+/*
+   ────────────────────────────────────────────────────────
+   ساختار و سازندهٔ کلاینت
+*/
+
 type MuChatClient struct {
-	apiKey string       // کلید API برای احراز هویت
-	http   *http.Client // کلاینت HTTP برای ارسال درخواست‌ها
+	apiKey string
+	http   *http.Client
 }
 
-// NewMuChatClient یک نمونه جدید از MuChatClient ایجاد می‌کند.
-// apiKey: کلید API برای احراز هویت با سرویس MuChat
+// NewMuChatClient یک نمونهٔ جدید از کلاینت می‌سازد.
 func NewMuChatClient(apiKey string) *MuChatClient {
 	return &MuChatClient{
 		apiKey: apiKey,
 		http: &http.Client{
-			Timeout: 60 * time.Second, // تنظیم تایم‌اوت ۶۰ ثانیه‌ای
+			Timeout: 60 * time.Second,
 		},
 	}
 }
 
-// Ask یک سوال را به عامل MuChat ارسال می‌کند و پاسخ را دریافت می‌کند.
-// ctx: کانتکست برای مدیریت تایم‌اوت و لغو درخواست
-// agentID: شناسه عامل MuChat
-// question: سوالی که باید ارسال شود
-// stream: اگر true باشد، پاسخ به صورت استریم دریافت می‌شود
-func (c *MuChatClient) Ask(ctx context.Context, agentID, question string, stream bool) (io.ReadCloser, error) {
+/*
+   ────────────────────────────────────────────────────────
+   مدل پاسخ موردنیاز
+*/
+type muChatResponse struct {
+	Answer string `json:"answer"`
+}
+
+/*
+Ask سؤال را به MuChat می‌فرستد و فقط **متن پاسخ** را برمی‌گرداند.
+
+اگر `stream` false باشد:
+	• بدنهٔ JSON را کامل می‌خواند
+	• فیلد answer را استخراج می‌کند
+	• همان متن را به صورت Reader برمی‌گرداند
+
+اگر `stream` true باشد:
+	• رویدادهای SSE را خط‌به‌خط می‌خواند
+	• فقط رویداد `answer` را Unmarshal می‌کند
+	• توکن‌های پاسخ را به‌‌صورت پیوسته در یک Pipe می‌نویسد
+*/
+func (c *MuChatClient) Ask(ctx context.Context, agentID, query string, stream bool) (io.ReadCloser, error) {
 	url := fmt.Sprintf("https://app.mu.chat/api/agents/%s/query", agentID)
 
-	// ساختن بدنه درخواست به صورت JSON
-	payload := map[string]interface{}{
-		"query":  question,
+	payload, _ := json.Marshal(map[string]interface{}{
+		"query":  query,
 		"stream": stream,
-	}
-	body, err := json.Marshal(payload)
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		return nil, fmt.Errorf("خطا در سریال‌سازی JSON: %w", err)
+		return nil, fmt.Errorf("ساخت درخواست HTTP شکست خورد: %w", err)
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("خطا در ساخت درخواست HTTP: %w", err)
-	}
-
-	// افزودن هدرهای لازم
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("خطا در ارسال درخواست HTTP: %w", err)
+		return nil, fmt.Errorf("ارسال HTTP شکست خورد: %w", err)
 	}
-
-	// بررسی کد وضعیت پاسخ
 	if resp.StatusCode == http.StatusForbidden {
-		return nil, errors.New("دسترسی غیرمجاز: کلید API ممکن است نامعتبر باشد")
-	}
-	if resp.StatusCode == http.StatusBadRequest {
-		return nil, errors.New("درخواست نامعتبر: پارامترهای ارسال شده ممکن است اشتباه باشند")
+		return nil, errors.New("دسترسی غیرمجاز: کلید API نامعتبر است")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("خطای غیرمنتظره: کد وضعیت %d", resp.StatusCode)
+		return nil, fmt.Errorf("خطای غیرمنتظره: %d", resp.StatusCode)
 	}
 
-	// اگر stream فعال باشد، پاسخ به صورت استریم بازگردانده می‌شود
+	/*──────────── حالت استریم ────────────*/
 	if stream {
-		return resp.Body, nil
+		pr, pw := io.Pipe()
+		go func() {
+			defer resp.Body.Close()
+			defer pw.Close()
+
+			scanner := bufio.NewScanner(resp.Body)
+			for scanner.Scan() {
+				line := scanner.Text()
+				if strings.HasPrefix(line, "data:") {
+					var r muChatResponse
+					if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data:")), &r); err == nil {
+						if _, werr := pw.Write([]byte(r.Answer)); werr != nil {
+							return
+						}
+					}
+				}
+			}
+		}()
+		return pr, nil
 	}
 
-	// اگر stream غیرفعال باشد، کل پاسخ خوانده می‌شود
+	/*──────────── حالت غیر استریم ────────────*/
 	defer resp.Body.Close()
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("خطا در دیکد کردن پاسخ JSON: %w", err)
+	var r muChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return nil, fmt.Errorf("دیکد JSON شکست خورد: %w", err)
 	}
-
-	// تبدیل پاسخ به یک Reader برای بازگرداندن
-	responseBody, err := json.Marshal(result)
-	if err != nil {
-		return nil, fmt.Errorf("خطا در سریال‌سازی پاسخ JSON: %w", err)
-	}
-
-	return io.NopCloser(bytes.NewReader(responseBody)), nil
+	return io.NopCloser(strings.NewReader(r.Answer)), nil
 }

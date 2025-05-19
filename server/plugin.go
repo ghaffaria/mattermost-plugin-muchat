@@ -9,44 +9,40 @@ import (
 
 	"github.com/pkg/errors"
 
-	// 📦  بسته‌های عمومی پلاگین
+	// بسته‌های عمومی Mattermost
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 	"github.com/mattermost/mattermost/server/public/pluginapi/cluster"
 
-	// 📦  لایهٔ کمکی داخلی
+	// لایهٔ کمکی داخلی
 	"github.com/ghaffaria/mattermost-plugin-starter-template/server/command"
 	"github.com/ghaffaria/mattermost-plugin-starter-template/server/store/kvstore"
 )
 
-/*
-	ساختار اصلی پلاگین – تمام منطق سرور اینجا نگه‌داری می‌شود.
-*/
+/*───────────────────────────────
+   ساختار اصلی پلاگین
+───────────────────────────────*/
 type Plugin struct {
 	plugin.MattermostPlugin
 
-	// ────────────────────────── وابستگی‌های کمکی
+	// وابستگی‌های کمکی
 	client        *pluginapi.Client
 	kvstore       kvstore.KVStore
 	commandClient command.Command
 	backgroundJob *cluster.Job
 
-	// ────────────────────────── پیکربندی
+	// پیکربندی
 	configurationLock sync.RWMutex
 	configuration     *Configuration
 
-	// ────────────────────────── Bot
+	// Bot
 	botUserID string
 }
 
-/*
-	OnActivate هنگام فعال‌سازی پلاگین:
-
-	1) ساخت Bot (اگر قبلاً نبوده)
-	2) ثبت دستور /mu
-	3) برنامه‌ریزی Job پس‌زمینه (نمونه)
-*/
+/*───────────────────────────────
+   OnActivate
+───────────────────────────────*/
 func (p *Plugin) OnActivate() error {
 	// کلاینت کمکی
 	p.client = pluginapi.NewClient(p.API, p.Driver)
@@ -71,7 +67,7 @@ func (p *Plugin) OnActivate() error {
 		return err
 	}
 
-	// 3) Job نمونهٔ پس‌زمینه (هر ساعت)
+	// 3) Job پس‌زمینهٔ نمونه (هر ساعت)
 	job, err := cluster.Schedule(
 		p.API,
 		"BackgroundJob",
@@ -87,9 +83,9 @@ func (p *Plugin) OnActivate() error {
 	return nil
 }
 
-/*
-	OnDeactivate در زمان غیرفعال‌سازی پلاگین
-*/
+/*───────────────────────────────
+   OnDeactivate
+───────────────────────────────*/
 func (p *Plugin) OnDeactivate() error {
 	if p.backgroundJob != nil {
 		if err := p.backgroundJob.Close(); err != nil {
@@ -99,42 +95,41 @@ func (p *Plugin) OnDeactivate() error {
 	return nil
 }
 
-/*
-	MessageHasBeenPosted:
-	اگر @muchat در پیام باشد، متن را به MuChat می‌فرستد و پاسخ را ریپلای می‌کند.
-*/
+/*───────────────────────────────
+   MessageHasBeenPosted
+───────────────────────────────*/
 func (p *Plugin) MessageHasBeenPosted(_ *plugin.Context, post *model.Post) {
-	// ۱) پیام خودِ Bot را نادیده بگیر
+	// پیام خود Bot
 	if post.UserId == p.botUserID {
 		return
 	}
-	// ۲) بررسی منشن
+	// منشن
 	if !strings.Contains(post.Message, "@muchat") {
 		return
 	}
 
-	// ۳) پاک‌کردن منشن از متن
+	// پاک‌کردن منشن
 	message := strings.ReplaceAll(post.Message, "@muchat", "")
 
-	// ۴) تماس با MuChat
+	// تماس با MuChat
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	cfg := p.getConfiguration()
 	client := NewMuChatClient(cfg.MuChatApiKey)
 
-	stream, err := client.Ask(ctx, cfg.AgentID, message, true)
+	reader, err := client.Ask(ctx, cfg.AgentID, message, false)
 	if err != nil {
 		logError(p, err, "خطا در تماس با MuChat")
 		return
 	}
-	defer stream.Close()
+	defer reader.Close()
 
-	// ۵) خواندن استریم پاسخ
+	// خواندن پاسخ
 	var sb strings.Builder
 	buf := make([]byte, 2048)
 	for {
-		n, rerr := stream.Read(buf)
+		n, rerr := reader.Read(buf)
 		if n > 0 {
 			sb.Write(buf[:n])
 		}
@@ -142,17 +137,23 @@ func (p *Plugin) MessageHasBeenPosted(_ *plugin.Context, post *model.Post) {
 			break
 		}
 		if rerr != nil {
-			logError(p, rerr, "خطا در خواندن پاسخ استریم")
+			logError(p, rerr, "خطا در خواندن پاسخ")
 			return
 		}
 	}
 
-	// ۶) ارسال ریپلای در همان رشته
+	// تمیزکاری متن خروجی
+	clean := strings.TrimSpace(sb.String())
+	clean = strings.ReplaceAll(clean, "\r\n", "\n")
+	clean = strings.ReplaceAll(clean, "\n\n", "\n")
+	clean = strings.TrimLeft(clean, ". \n\t")
+
+	// ارسال پست پاسخ
 	reply := &model.Post{
 		UserId:    p.botUserID,
 		ChannelId: post.ChannelId,
 		RootId:    post.Id,
-		Message:   sb.String(),
+		Message:   clean,
 	}
 	if _, err = p.API.CreatePost(reply); err != nil {
 		logError(p, err, "خطا در ارسال پاسخ MuChat")
