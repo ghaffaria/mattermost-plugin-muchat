@@ -5,6 +5,8 @@ import (
 	"log"
 )
 
+const debugPrefix = "[MuChat]" // Prefix for debug logs
+
 // logDebug یک پیام دیباگ را لاگ می‌کند اگر حالت دیباگ فعال باشد.
 // هر خط لاگ با "[MuChat]" شروع می‌شود.
 // p: نمونه‌ای از پلاگین
