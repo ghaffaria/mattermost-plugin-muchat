@@ -5,7 +5,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/mattermost/mattermost/server/public/plugin"
-	"github.com/mattermost/mattermost/server/public/model"
 )
 
 // ServeHTTP demonstrates a plugin that handles HTTP requests by greeting the world.
