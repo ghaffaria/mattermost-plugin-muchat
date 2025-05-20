@@ -22,9 +22,13 @@ import (
 	"github.com/ghaffaria/mattermost-plugin-starter-template/server/store/kvstore"
 )
 
-/*───────────────────────────────
-   Plugin struct
-───────────────────────────────*/
+/*
+───────────────────────────────
+
+	Plugin struct
+
+───────────────────────────────
+*/
 type Plugin struct {
 	plugin.MattermostPlugin
 
@@ -40,9 +44,13 @@ type Plugin struct {
 	botUsername string
 }
 
-/*───────────────────────────────
-   OnActivate
-───────────────────────────────*/
+/*
+───────────────────────────────
+
+	OnActivate
+
+───────────────────────────────
+*/
 func (p *Plugin) OnActivate() error {
 	p.client = pluginapi.NewClient(p.API, p.Driver)
 	p.kvstore = kvstore.NewKVStore(p.client)
@@ -77,9 +85,13 @@ func (p *Plugin) OnActivate() error {
 	return nil
 }
 
-/*───────────────────────────────
-   Helpers
-───────────────────────────────*/
+/*
+───────────────────────────────
+
+	Helpers
+
+───────────────────────────────
+*/
 func contains(list []string, id string) bool {
 	for _, v := range list {
 		if v == id {
@@ -105,9 +117,13 @@ func isAllowed(id, mode string, allow, block []string, isChannel bool) bool {
 	}
 }
 
-/*───────────────────────────────
-   MessageHasBeenPosted
-───────────────────────────────*/
+/*
+───────────────────────────────
+
+	MessageHasBeenPosted
+
+───────────────────────────────
+*/
 func (p *Plugin) MessageHasBeenPosted(_ *plugin.Context, post *model.Post) {
 	// ignore messages from the bot itself
 	if post.UserId == p.botUserID {
