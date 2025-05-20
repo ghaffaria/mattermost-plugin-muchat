@@ -17,13 +17,13 @@ import (
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 	"github.com/mattermost/mattermost/server/public/pluginapi/cluster"
 
-	// لایهٔ کمکی داخلی
+	// internal helpers
 	"github.com/ghaffaria/mattermost-plugin-starter-template/server/command"
 	"github.com/ghaffaria/mattermost-plugin-starter-template/server/store/kvstore"
 )
 
 /*───────────────────────────────
-   ساختار اصلی پلاگین
+   Plugin struct
 ───────────────────────────────*/
 type Plugin struct {
 	plugin.MattermostPlugin
@@ -36,7 +36,8 @@ type Plugin struct {
 	configurationLock sync.RWMutex
 	configuration     *Configuration
 
-	botUserID string
+	botUserID   string
+	botUsername string
 }
 
 /*───────────────────────────────
@@ -57,6 +58,7 @@ func (p *Plugin) OnActivate() error {
 		return errors.Wrap(appErr, "cannot ensure bot")
 	}
 	p.botUserID = botID
+	p.botUsername = bot.Username
 
 	if err := p.API.RegisterCommand(command.GetCommand()); err != nil {
 		return err
@@ -76,7 +78,7 @@ func (p *Plugin) OnActivate() error {
 }
 
 /*───────────────────────────────
-   کمکى: بررسی وجود مقدار در Slice
+   Helpers
 ───────────────────────────────*/
 func contains(list []string, id string) bool {
 	for _, v := range list {
@@ -87,14 +89,10 @@ func contains(list []string, id string) bool {
 	return false
 }
 
-/*───────────────────────────────
-   فیلتر دسترسی
-───────────────────────────────*/
-func isAllowed(id string, mode string, allow []string, block []string, isChannel bool) bool {
+func isAllowed(id, mode string, allow, block []string, isChannel bool) bool {
 	switch mode {
 	case "block_all":
 		if isChannel {
-			// برای ChannelAccess فقط block_all معتبر است
 			return false
 		}
 		return true
@@ -111,48 +109,55 @@ func isAllowed(id string, mode string, allow []string, block []string, isChannel
    MessageHasBeenPosted
 ───────────────────────────────*/
 func (p *Plugin) MessageHasBeenPosted(_ *plugin.Context, post *model.Post) {
-	// ۱) پیام خود Bot را نادیده بگیر
+	// ignore messages from the bot itself
 	if post.UserId == p.botUserID {
 		return
 	}
 
 	cfg := p.getConfiguration()
 
-	// ۲) نوع کانال را بگیر
+	// fetch channel information
 	channel, chErr := p.API.GetChannel(post.ChannelId)
 	if chErr != nil {
 		logError(p, chErr, "cannot get channel")
 		return
 	}
 
-	/*────────────────── دسترسی کانال ──────────────────*/
-	if !isAllowed(channel.Id, cfg.ChannelAccess, cfg.ChannelAllowIDs, cfg.ChannelBlockIDs, true) {
+	// ignore if bot is not a member of the channel
+	if _, err := p.API.GetChannelMember(channel.Id, p.botUserID); err != nil {
 		return
 	}
 
-	/*────────────────── دسترسی کاربر ──────────────────*/
+	// access control checks
+	if !isAllowed(channel.Id, cfg.ChannelAccess, cfg.ChannelAllowIDs, cfg.ChannelBlockIDs, true) {
+		return
+	}
 	if !isAllowed(post.UserId, cfg.UserAccess, cfg.UserAllowIDs, cfg.UserBlockIDs, false) {
 		return
 	}
 
 	isDM := channel.Type == model.ChannelTypeDirect
 
-	// ۳) در کانال غیر DM وجود @muchat الزامی است
-	if !isDM && !strings.Contains(post.Message, "@muchat") {
+	// mention logic
+	mentioned := strings.Contains(post.Message, "@"+p.botUsername) ||
+		strings.Contains(post.Message, "<@"+p.botUserID+">")
+
+	if !isDM && !mentioned {
 		return
 	}
 
-	// ۴) متن پرسش
+	// strip mention for non-DM messages
 	message := post.Message
 	if !isDM {
-		message = strings.ReplaceAll(message, "@muchat", "")
+		message = strings.ReplaceAll(message, "@"+p.botUsername, "")
+		message = strings.ReplaceAll(message, "<@"+p.botUserID+">", "")
 	}
 	message = strings.TrimSpace(message)
 	if message == "" {
 		return
 	}
 
-	// ۵) تماس با MuChat
+	// call MuChat
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -179,15 +184,15 @@ func (p *Plugin) MessageHasBeenPosted(_ *plugin.Context, post *model.Post) {
 		}
 	}
 
-	clean := strings.TrimSpace(sb.String())
-	if clean == "" {
-		clean = "متأسفم، پاسخی دریافت نشد."
+	reply := strings.TrimSpace(sb.String())
+	if reply == "" {
+		reply = "متأسفم، پاسخی دریافت نشد."
 	}
 
 	_, _ = p.API.CreatePost(&model.Post{
 		UserId:    p.botUserID,
 		ChannelId: post.ChannelId,
 		RootId:    post.Id,
-		Message:   clean,
+		Message:   reply,
 	})
 }
